@@ -94,7 +94,20 @@ XGMII 硬件接口如下，TX/RX 方向各自有独立的 32bit 数据线 (T/RXD
 ![alt text](MII.assets/image-11.png)
 ![alt text](MII.assets/image-12.png)
 
+与 GMII 一致， XGMII 的 preamble 与 sfd 也分别是 8bit `10101010` 与 `10101011`，需要注意的是，发送一方会将 lane0 的第一个 8bit preamble 转换成一个特定的 START pattern (TXC[lane0]=1, with TXD=0xFC)，利用 TXC 的上升脉冲作为起始标志。接收方一侧需要识别该 pattern 并将其转换成 preamble 字符编码并作上报。相对应的，发送完成时则会在对应的 TXC[laneX] 拉高后输出一个 Terminate pattern 作为结束标志。
 
+![alt text](MII.assets/image-13.png)
+![alt text](MII.assets/image-14.png)
+![alt text](MII.assets/image-15.png)
+
+
+### XAUI & XAUI (clause 47)
+
+由于高速信号之间存在严重的串扰问题，因此速率、多线程与传输距离之间彼此矛盾，是一个不可能三角。由于 XGMII 的 TX/RX 分别有 32跟数据线以及 CLK 与 control 线，线路过多导致无法长距离传输。因此为了适配长距离传输，802.3 标准为 XGMII 定义了一套远距离传输方案： 
+
+![alt text](MII.assets/image-16.png)
+
+XGXS 将 32 路 XGMII 转换为 4 条差分线 (XAUI)。XGXS 内部集成 8B/10B 编码，为满足 10G 速率要求，因此 XAUI 工作频率为 3.125GBps (10Gbps*(10/8)/4).
 
 ## 1.4. MDIO (IEE 802.3, clause 22&45)
 
