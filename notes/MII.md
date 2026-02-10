@@ -21,6 +21,12 @@ MII 接线结构如下：
 - COL: 冲突检测。
 - MDIO/MDC: 按照 clause 22/45 在 mac 与 phy 之间传递控制信息，MDC 为 MDIO 的采样时钟。
 
+## 1.4. MDIO (IEE 802.3, clause 22&45)
+
+由于 soc 与 phy 无法直接通过 apb 总线访问后者内部寄存器，因此需要在 MII 总线上适配控制信号以使 cpu 具备操作 phy 寄存器的能力，以完成 phy 初始化等流程。MII 总线定义了独立的两根线以在 mac-phy 之间传递控制信号和状态信息：
+
+1. Manage Data Clock (MDC, pin3), 作为 MDIO 接口的时钟输入，由 mac 提供，最小周期为 400ns.
+2. Manage Data Input/Output (MDIO, pin2), 控制信号与状态传递。其中控制信息由 mac 一侧驱动，phy 采样，状态信息则相反。
 
 ### MII stream flow
 
@@ -84,21 +90,27 @@ clause 35 定义了 GMII 的 low-power mode 协议格式。配置 TX_EN=0, TX_ER
 
 ## 1.3. XGMII (IEE 802.3, clause 46)
 
-XGMII 用于 10G 以太网中 mac-phy 的连接接口。其数据线扩展为在 GMII 的基础上扩展为 4 路 8bit 数据，合计 32bit T/RXD，且支持动态裁剪以适配 5G/2.5G 速率。
-
 ![alt text](MII.assets/image-10.png)
-
-XGMII 硬件接口如下，TX/RX 方向各自有独立的 32bit 数据线 (T/RXD) 与 4bit 控制线 (T/RXC)。在实际传输时拆分成 4 lane 分别进行传输。4 lane 共享同一个时钟 (T/RX_CLK)。
-10G 速率下 T/RX_CLK 频率为 125MHz，数据按照 DDR 模式分别在 TX_CLK 上升沿与下降沿采样。
-
 ![alt text](MII.assets/image-11.png)
+
+```
+156.25Mhz * 2 * 32bit = 10000Mbps
+```
+
+XGMII TX/RX 方向各自有独立的 32bit 数据线 (T/RXD) 与 4bit 控制线 (T/RXC)。数据按照 DDR 模式分别在 TX_CLK 上升沿与下降沿采样，T/RX_CLK 频率为 156.25MHz 从而实现 10Gbps 速率。
+
+XGMII 在实际传输时拆分成 4 lane 分别进行传输，每路由独立的控制信号 TXC，且支持动态裁剪以适配 5G/2.5G 速率：
+- Lane x4: 10G
+- Lane x2: 5G
+- Lane x1: 2.5G
+
+
 ![alt text](MII.assets/image-12.png)
+![alt text](MII.assets/image-13.png)
 
+XGMII 要求数据为 8bit 对齐。preamble+sfd 与 MII 格式一致。经过两个时钟周期的先导后即开始发送数据。preamble 的第一个 8bit 数据被编码为特殊的 Start pattern (TXC0=1, TXD=0xFB)，从而利用 TXC 的脉冲信号指示开始，并在结束处构建 Terminate pattern (TXCx=1, TXD=0xFD) 指示数据结束。
 
+![alt text](MII.assets/image-14.png)
+![alt text](MII.assets/image-15.png)
 
-## 1.4. MDIO (IEE 802.3, clause 22&45)
-
-由于 soc 与 phy 无法直接通过 apb 总线访问后者内部寄存器，因此需要在 MII 总线上适配控制信号以使 cpu 具备操作 phy 寄存器的能力，以完成 phy 初始化等流程。MII 总线定义了独立的两根线以在 mac-phy 之间传递控制信号和状态信息：
-
-1. Manage Data Clock (MDC, pin3), 作为 MDIO 接口的时钟输入，由 mac 提供，最小周期为 400ns.
-2. Manage Data Input/Output (MDIO, pin2), 控制信号与状态传递。其中控制信息由 mac 一侧驱动，phy 采样，状态信息则相反。
+Reconciliation sublayer 需要将 MAC 数据匹配为 XGMII 所需的数据格式。一个重要的要求控制 inter-frame 的时长，从而实现 preamble TXC0 对齐。
