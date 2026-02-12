@@ -21,7 +21,7 @@ MII 接线结构如下：
 - COL: 冲突检测。
 - MDIO/MDC: 按照 clause 22/45 在 mac 与 phy 之间传递控制信息，MDC 为 MDIO 的采样时钟。
 
-## 1.4. MDIO (IEE 802.3, clause 22&45)
+## MDIO (IEE 802.3, clause 22&45)
 
 由于 soc 与 phy 无法直接通过 apb 总线访问后者内部寄存器，因此需要在 MII 总线上适配控制信号以使 cpu 具备操作 phy 寄存器的能力，以完成 phy 初始化等流程。MII 总线定义了独立的两根线以在 mac-phy 之间传递控制信号和状态信息：
 
@@ -108,7 +108,7 @@ XGMII 在实际传输时拆分成 4 lane 分别进行传输，每路由独立的
 ![alt text](MII.assets/image-12.png)
 ![alt text](MII.assets/image-13.png)
 
-XGMII 要求数据为 8bit 对齐。preamble+sfd 与 MII 格式一致。经过两个时钟周期的先导后即开始发送数据。preamble 的第一个 8bit 数据被编码为特殊的 Start pattern (TXC0=1, TXD=0xFB)，从而利用 TXC 的脉冲信号指示开始，并在结束处构建 Terminate pattern (TXCx=1, TXD=0xFD) 指示数据结束。
+XGMII 要求数据为 8bit 对齐。preamble+sfd 与 MII 格式一致。经过两个时钟周期的先导后即开始发送数据。preamble 的第一个 8bit 数据被编码为特殊的 Start control register (SCC, as TXC0=1, TXD=0xFB)，从而利用 TXC 的脉冲信号指示开始，并在结束处构建 Terminate pattern (TXCx=1, TXD=0xFD) 指示数据结束。
 
 ![alt text](MII.assets/image-14.png)
 ![alt text](MII.assets/image-15.png)
