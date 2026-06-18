@@ -177,3 +177,62 @@ If the corresponding bit value of the MAC_Hash_Table_Reg0 register is 1'b1, the 
 If the Hash Table register is configured to be double-synchronized to the (X)GMII clock domain, the synchronization is triggered only when Bits[31:24] (in little-endian mode) or Bits[7:0] (in big-endian mode) of the Hash Table Register X registers are written.
 
 If double-synchronization is enabled, consecutive writes to this register must be performed after at least four clock cycles in the destination clock domain.
+
+翻译成人话:
+1. 对 6 字节 mac 地址计算 crc 后取反
+2. 取 crc 高侧 6bit (for 64bit hash, 7bit for 128bit hash, and 8bit for 256bit hash)
+3. 将对应 hash table bit 置位:
+
+对应 freebsd 源代码:
+```c
+uint32_t
+ether_crc32_le(const uint8_t *buf, size_t len)
+{
+	static const uint32_t crctab[] = {
+		0x00000000, 0x1db71064, 0x3b6e20c8, 0x26d930ac,
+		0x76dc4190, 0x6b6b51f4, 0x4db26158, 0x5005713c,
+		0xedb88320, 0xf00f9344, 0xd6d6a3e8, 0xcb61b38c,
+		0x9b64c2b0, 0x86d3d2d4, 0xa00ae278, 0xbdbdf21c
+	};
+	size_t i;
+	uint32_t crc;
+
+	crc = 0xffffffff;	/* initial value */
+
+	for (i = 0; i < len; i++) {
+		crc ^= buf[i];
+		crc = (crc >> 4) ^ crctab[crc & 0xf];
+		crc = (crc >> 4) ^ crctab[crc & 0xf];
+	}
+
+	return (crc);
+}
+
+#define DWCXG_HASH_TABLE 128
+#define DWCXG_HASH_TABLE_LOG2 7
+
+static u_int stmmac_filter_hash_maddr(void *arg, struct sockaddr_dl *sdl, u_int cnt)
+{
+	struct stmmac_hash_maddr_ctx *ctx = arg;
+	struct stmmac_softc *sc = ctx->sc;
+	uint32_t crc, hashbit, hashreg;
+	uint8_t val;
+
+	DEV_NETTRACE(sc->dev, "hash %d multicast: %02X:%02X:%02X:%02X:%02X:%02X",
+		cnt,
+		LLADDR(sdl)[0], LLADDR(sdl)[1], LLADDR(sdl)[2],
+		LLADDR(sdl)[3], LLADDR(sdl)[4], LLADDR(sdl)[5]);
+
+	crc = ether_crc32_le(LLADDR(sdl), ETHER_ADDR_LEN);
+
+	/* Take lower 7 bits for 128bit hash table and reverse it */
+	val = (bitreverse(~crc & 0xff) >> (32 - DWCXG_HASH_TABLE_LOG2));
+
+	hashreg = (val >> 5);
+	hashbit = (val & 31);
+	ctx->hash[hashreg] |= (1 << hashbit);
+
+	return 1;
+}
+```
+
