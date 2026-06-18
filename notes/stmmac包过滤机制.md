@@ -1,3 +1,61 @@
+# 1. 寄存器讨论
+
+`MAC_Packet_Filter`
+
+- `RA`(BIT_31): receive all.
+- `VUCC`(BIT_22): VxLAN UDP/IPv6 Checksum Control.
+- `DNTU`(BIT_21): Drop Non-TCP/UDP over IP Packets. 这是一个 L4 级别的 filter, 自动监测并过滤所有的非 tcp/udp 包.
+- `IPFE`(BIT_20): Layer 3 and Layer 4 Filter Enable.
+- `VTFE`(BIT_16): VLAN Tag Filter Enable.
+- `DHLFRS`(BIT_12:11): DA Hash Index or L3/L4 Filter Number in Receive Status.
+- `HPF`(BIT_10): Hash or Perfect Filter: xgmac 提供了两种包过滤机制: 通过 DA address 做 perfect filter 或者通过 hash table 做 unperfect filter. *如果 HPF=0 则强制按照 hash 的模式做 filter, 配置为 1 则按照 HMU/HUC 做决定.*
+- `SAF`(BIT_9): Source Address Filter Enable. 校验 SA field 并与 MAC_Address registers 做比对, 不 match 的包会被丢弃.
+- `SAIF`(BIT_8): SA Inverse Filtering. 在该种情况下 MAC_Address 的功能反过来, 只有匹配的包会被丢弃, 不匹配的包反而会被接收.
+- `PCF`(BIT_7:6): Pass Control Packets. These bits control the forwarding of all control packets (including unicast and multicast Pause packets).
+	- 00: The MAC filters all control packets from reaching the application.
+	- 01: The MAC forwards all control packets except Pause packets to the application even if they fail the Address filter.
+	- 10: The MAC forwards all control packets to the application even if they fail the Address filter.
+	- 11: The MAC forwards the control packets that pass the Address filter.
+- `DBF`(BIT_5): Disable Broadcast Packets.
+- `PM`(BIT_4): Pass All Multicast. 如果该 bit 置 0, 就会对 multicast 做 perfect or hash filtering.
+- `DAIF`(BIT_3): DA Inverse Filtering.
+- `HMC`(BIT_2): Hash Multicast.
+- `HUC`(BIT_1): Hash Unicast.
+- `PR`(BIT_0): Promiscuous Mode. When this bit is set, the Address Filtering module passes all incoming packets irrespective of the destination or source address. The MAC clears the SA or DA Filter Fail status bits of the Rx Status Word when PR is set.
+
+# 2. filter 机制 (Source Address or Destination Address Filtering)
+
+xgmac 提供了两种包过滤机制:
+- perfect filtering: 将全部 48 bits DA field 与内部预设的 MAC address 寄存器列表做比对.
+- hash filtering: imperfect filtering, 只对 upper 6 bits (depend on hash table size) 做 CRC 之后从 hash table 中做查询.
+
+## 2.1. Unicast Destination Address Filtering
+
+Perfect filtering: 通过 `MAC_Packet_Filter.HUC=0` 使能, xgmac 支持配置 32 MAC addresses for unicast filtering. MacAddr0 is always enabled 但是其他的 addr 需要用 mask 使能.
+
+Hask filtering: 通过 `MAC_Packet_Filter.HUC=1` 使能, 其对 upper 6bits 做 crc 后判断 hash table 中的 bit 位, 例如 crc=6'b000000 对应 hash table bit_0, crc=6'b111111 对应 bit_63. 如果预设的 bit 被置 1, 则 filter 通过, 反之 drop
+
+## 2.2. Multicast Destination Address Filtering
+
+1. 可以通过配置 `MAC_Packet_Filter.PM=1` to pass all multicast packets.
+2. 在配置 `PM=0` 的情况下 multicast `HMC=1` 的情况做 hash filter, 否则做 perfect filter.
+
+## 2.3. Hash or Perfect Address Filtering
+
+1. `HPF` 配 0 则全都强制走 hash
+2. `HPF=1` 的情况, `HUC` 控制 unicast, `HMU` 控制 multicast 的走向
+
+## 2.4. Broadcast Address Filtering
+
+xgmac 不对 broadcast 做过滤, 可以通过 `DBF` 拒绝所有 broadcast.
+
+## 2.5. Unicast Source Address Filtering
+
+xgmac 可以通过特定 bit 来过滤 source-address 而非 destination-address.
+
+## 2.6. Inverse Filtering
+
+# 3. linux 流程讨论
 ```c
 static void dwxgmac2_set_mchash(void __iomem *ioaddr, u32 *mcfilterbits,
 				int mcbitslog2)
@@ -81,31 +139,30 @@ static void dwxgmac2_set_filter(struct mac_device_info *hw,
 }
 ```
 
-# 1. `IFF_PROMISC`(0x100): receive all packets
+## 3.1. 默认配置:
 
-在该种模式下直接配置 `XGMAC_FILTER_PR | XGMAC_FILTER_PCF`:
+- `PR=0`: 该 bit 会让所有的包都被接收而不做过滤, 置0以使能过滤机制
+- `PM=0, HMC=0`: 对 multicast 做包过滤, 配置为 perfect filter
+- `HPF=1`: 不强制做 hash filter, 交予 `HMU/HUC` 决定
 
-- `XGMAC_FILTER_PR`(BIT_0): When this bit is set, the Address Filtering module passes all incoming packets irrespective of the destination or source address. The MAC clears the SA or DA Filter Fail status bits of the Rx Status Word when PR is set.
-- `XGMAC_FILTER_PCF`(BIT_7): Pass Control Packets. These bits control the forwarding of all control packets (including unicast and multicast Pause packets):
+## 3.2. multicast 配置:
+- `IFF_PROMISC`(0x100): receive all packets
+	- `PR=1`: 接收所有的包: broadcast/unicast/multicast
+	- `PCF=0'b10`: 此处配置为 0b10, 通过所有 packets
 
-    - 00: The MAC filters all control packets from reaching the application.
-    - 01: The MAC forwards all control packets except Pause packets to the application even if they fail the Address filter.
-    - 10: The MAC forwards all control packets to the application even if they fail the Address filter.
-    - 11: The MAC forwards the control packets that pass the Address filter.
+- `IFF_ALLMULTI`(0x200): receive all multicast packets
+	- `PM=1`: 接收所有 multicast
+	- 同步清空 hash table
 
-    此处配置为 0b10, 通过所有 packets.
+- `IFF_MULTICAST`(0x8000): supports multicast
+	在这种情况下就需要选择 filter, stmmac 选择使用 hash filter 机制: `HMC=1` 的情况下根据软件配置的 multicast address 配置 hash table, 其中 hash table 需要根据 hash table size 来决定计算方式.
 
-# 2. `IFF_ALLMULTI`(0x200): receive all multicast packets
+## 3.3. unicast 配置:
 
-- `XGMAC_FILTER_PM`(BIT_4): Pass All Multicast. When this bit is set, it indicates that all the received packets with a multicast destination address (first bit in the destination address field is 1) are passed. When this bit is reset, filtering of multicast packet is done depending on HMC bit.
+1. 如果软件希望配置的 unicast 超过了 DA address list size, 那就直接拉 `PR=1`, 直接不做 filter 给所有的包开绿灯(真是个简单粗暴的方法...)
+2. 正常情况下则配置正常配置 DA 并作 perfect filter
 
-该流程同步清空了 `XGMAC_HASH_TABLE`.
-
-# 3. `IFF_MULTICAST`(0x8000): supports multicast
-
-- `XGMAC_FILTER_HMC`(BIT_2): Hash Multicast. When this bit is set, the MAC performs the destination address filtering of received multicast packets according to the hash table. When this bit is reset, the MAC performs the perfect destination address filtering for multicast packets, that is, it compares the DA field with the values programmed in MAC_Address registers.
-
-在 HMC 的情况下, 包过滤机制由 DA MAC_Address 配置变更为 hash table 做计算。随后 mac 会根据 hash 做包过滤:
+# 4. hash table 计算规则
 
 The 64-bit, 128-bit, or 256-bit hash table is used for group address filtering. For hash filtering, the content of the destination address in the incoming packet is passed through the CRC logic and the upper six (seven or eight in 128- or 256-bit Hash) bits of the CRC are used to index the content of the Hash table. The most significant bits determines the register to be used (Hash Table Register X), and the least significant five bits determine the bit within the register For example, a hash value of 7b'1100000 (in 128-bit Hash) selects Bit 0 of the Hash Table Register 3 and a value of 8b'10111111 (in 256-bit Hash) selects Bit 31 of the Hash Table Register 5.
 The hash value of the destination address is calculated in the following way:
