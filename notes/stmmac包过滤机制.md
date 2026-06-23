@@ -208,25 +208,33 @@ ether_crc32_le(const uint8_t *buf, size_t len)
 	return (crc);
 }
 
+static uint32_t bitreverse(uint32_t value)
+{
+	uint32_t result = 0;
+
+	for (int i = 0; i < 32; i++) {
+		uint32_t bit = value & 1;
+
+		result = (result << 1) | bit;
+		value >>= 1;
+	}
+
+	return result;
+}
+
 #define DWCXG_HASH_TABLE 128
 #define DWCXG_HASH_TABLE_LOG2 7
 
 static u_int stmmac_filter_hash_maddr(void *arg, struct sockaddr_dl *sdl, u_int cnt)
 {
 	struct stmmac_hash_maddr_ctx *ctx = arg;
-	struct stmmac_softc *sc = ctx->sc;
 	uint32_t crc, hashbit, hashreg;
 	uint8_t val;
-
-	DEV_NETTRACE(sc->dev, "hash %d multicast: %02X:%02X:%02X:%02X:%02X:%02X",
-		cnt,
-		LLADDR(sdl)[0], LLADDR(sdl)[1], LLADDR(sdl)[2],
-		LLADDR(sdl)[3], LLADDR(sdl)[4], LLADDR(sdl)[5]);
 
 	crc = ether_crc32_le(LLADDR(sdl), ETHER_ADDR_LEN);
 
 	/* Take lower 7 bits for 128bit hash table and reverse it */
-	val = (bitreverse(~crc & 0xff) >> (32 - DWCXG_HASH_TABLE_LOG2));
+	val = (bitreverse(~crc) >> (32 - DWCXG_HASH_TABLE_LOG2));
 
 	hashreg = (val >> 5);
 	hashbit = (val & 31);
@@ -235,4 +243,3 @@ static u_int stmmac_filter_hash_maddr(void *arg, struct sockaddr_dl *sdl, u_int 
 	return 1;
 }
 ```
-
